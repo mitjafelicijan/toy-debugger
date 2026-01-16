@@ -7,8 +7,16 @@ https://github.com/user-attachments/assets/cf618ec7-44e0-4155-9869-e99337ce3f77
 
 ## Requirements
 
+> ![IMPORTANT]
+> You need to have `llvm` version 21 installed. You can install it with your
+> package manager. Include paths in `Makefile` are specific for this version
+> and have been tested on Void Linux and macOS.
+
 ```sh
+# Void Linux
 sudo xbps-install -S lldb21-devel clang llvm llvm-devel
+# macOS
+brew install llvm
 ```
 
 After you clone the repository build the debugger and a sample program with
