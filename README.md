@@ -3,7 +3,7 @@
 This project demonstrates how to use the LLDB C++ API to build a very basic
 debugger.
 
-https://github.com/user-attachments/assets/a42057f5-1899-416a-a408-e38efef89866
+https://github.com/user-attachments/assets/cf618ec7-44e0-4155-9869-e99337ce3f77
 
 ## Requirements
 
