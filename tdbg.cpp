@@ -20,7 +20,7 @@ using namespace lldb;
 const int LOG_WINDOW_HEIGHT = 10;
 const int STATUS_WINDOW_HEIGHT = 1;
 const int BREAKPOINTS_WINDOW_HEIGHT = 10;
-const int SIDEBAR_WIDTH = 40;
+const int SIDEBAR_WIDTH = 50;
 
 // https://unicodeplus.com/U+2593
 const uint32_t SCROLLBAR_THUMB = 0x2593; // Dark shade
@@ -149,6 +149,7 @@ char get_type_char(SBType type) {
 	TypeClass type_class = type.GetTypeClass();
 	if (type_class & eTypeClassStruct) return 's';
 	if (type_class & eTypeClassClass) return 'c';
+	if (type_class & eTypeClassEnumeration) return 'e';
 
 	const char* name = type.GetName();
 	if (name && *name) return name[0];

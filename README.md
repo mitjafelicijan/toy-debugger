@@ -62,6 +62,7 @@ When adding breakpoints or printing variables:
 | Struct        | `s`                       |
 | Class         | `c`                       |
 | Void          | `v`                       |
+| Enumeration   | `e`                       |
 | Default       | First letter of type name |
 
 > [!NOTE]
