@@ -721,9 +721,10 @@ int main(int argc, char** argv) {
 				}
 			} else if (ev.type == TB_EVENT_MOUSE) {
 				int main_window_height = tb_height() - LOG_WINDOW_HEIGHT - STATUS_WINDOW_HEIGHT;
+
+				// Log window scrolling
 				int log_start_y = main_window_height;
 				int log_end_y = tb_height() - STATUS_WINDOW_HEIGHT;
-
 				if (ev.y >= log_start_y && ev.y < log_end_y) {
 					if (ev.key == TB_KEY_MOUSE_WHEEL_UP) {
 						int max_scroll = std::max(0, (int)log_buffer.size() - (LOG_WINDOW_HEIGHT - 2));
