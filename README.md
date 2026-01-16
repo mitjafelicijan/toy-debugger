@@ -1,7 +1,7 @@
 # Toy Debugger
 
 This project demonstrates how to use the LLDB C++ API to build a very basic
-debugger tool.
+debugger.
 
 https://github.com/user-attachments/assets/677f69fd-c5fe-402c-9342-3304547b29aa
 
