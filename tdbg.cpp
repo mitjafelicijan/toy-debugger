@@ -4,6 +4,8 @@
 #include <string>
 #include <thread>
 #include <chrono>
+#include <fstream>
+#include <vector>
 
 using namespace lldb;
 
@@ -40,7 +42,6 @@ void print_variables(SBFrame &frame) {
 	}
 }
 
-
 void print_backtrace(SBThread &thread) {
 	int num_frames = thread.GetNumFrames();
 	for (int i = 0; i < num_frames; ++i) {
@@ -48,6 +49,25 @@ void print_backtrace(SBThread &thread) {
 		std::cout << "#" << i << " " << frame.GetFunctionName()
 			<< " at line " << frame.GetLineEntry().GetLine() << "\n";
 	}
+}
+
+void print_source_line(const std::string& filepath, int line_number) {
+    std::ifstream file(filepath);
+    if (!file.is_open()) {
+        // std::cerr << "Could not open source file: " << filepath << "\n";
+        return;
+    }
+
+    std::string line;
+    int current_line = 1;
+    while (std::getline(file, line)) {
+        if (current_line >= line_number - 3 && current_line <= line_number + 3) {
+            std::cout << (current_line == line_number ? " -> " : "    ") 
+                      << current_line << ": " << line << "\n";
+        }
+        if (current_line > line_number + 3) break;
+        current_line++;
+    }
 }
 
 int main(int argc, char** argv) {
@@ -83,6 +103,8 @@ int main(int argc, char** argv) {
 	SBListener listener = debugger.GetListener();
 	SBEvent event;
 
+    std::string last_cmd;
+
 	while (true) {
 		// Wait for events from LLDB.
 		if (listener.WaitForEvent(1, event)) {
@@ -97,11 +119,38 @@ int main(int argc, char** argv) {
 						std::cout << "Stopped at function: " << frame.GetFunctionName()
 							<< ", line: " << frame.GetLineEntry().GetLine() << "\n";
 
+                        SBFileSpec line_entry = frame.GetLineEntry().GetFileSpec();
+                        if (line_entry.IsValid()) {
+                            // Directory and Filename might be null if not debug info
+                            const char* dirname = line_entry.GetDirectory();
+                            const char* filename = line_entry.GetFilename();
+                            if (filename) {
+                                std::string fullpath;
+                                if (dirname) {
+                                    fullpath = std::string(dirname) + "/" + std::string(filename);
+                                } else {
+                                    fullpath = std::string(filename);
+                                }
+                                print_source_line(fullpath, frame.GetLineEntry().GetLine());
+                            }
+                        }
+
 						// REPL loop for user commands.
 						std::string cmd;
+
 						while (true) {
 							std::cout << "(tdbg) ";
 							std::getline(std::cin, cmd);
+
+                            if (cmd.empty()) {
+                                if (last_cmd.empty()) {
+                                    continue;
+                                }
+                                cmd = last_cmd;
+                            } else {
+                                last_cmd = cmd;
+                            }
+
 							if (cmd == "c") {
 								process.Continue();
 								break; // exit REPL, wait for next stop
@@ -115,11 +164,13 @@ int main(int argc, char** argv) {
 								print_backtrace(thread);
 							} else if (cmd == "v") {
 								print_variables(frame);
+                            } else if (cmd == "h") {
+								std::cout << "Commands: c=continue, s=step in, n=step over, bt=backtrace, v=variables, q=quit, h=help\n";
 							} else if (cmd == "q") {
 								process.Kill();
 								goto cleanup;
 							} else {
-								std::cout << "Commands: c=continue, s=step in, n=step over, bt=backtrace, v=variables, q=quit\n";
+								std::cout << "Unknown command. Type 'h' for help.\n";
 							}
 						}
 						break;
