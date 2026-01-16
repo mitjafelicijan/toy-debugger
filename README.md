@@ -3,6 +3,10 @@
 This project demonstrates how to use the LLDB C++ API to build a very basic
 debugger.
 
+> [!IMPORTANT]
+> This is a work in progress and is not a production-ready debugger. I wrote
+> this to learn how to use the LLDB C++ API.
+
 https://github.com/user-attachments/assets/677f69fd-c5fe-402c-9342-3304547b29aa
 
 ## Requirements
@@ -12,15 +16,63 @@ sudo xbps-install -S lldb21-devel clang llvm llvm-devel
 ```
 
 After you clone the repository build the debugger and a sample program with
-`make`.
+`make all -B`.
 
-Then run the debugger with example program with `./tdbg example`.
+## How to use
 
-## Available commands
+Run the debugger with: `./tdbg <target_executable>`
 
-- `c` - Continue execution until the next breakpoint or stop
-- `s` - Step into the next instruction/function
-- `n` - Step over the next instruction/function
-- `bt` - Print a backtrace (call stack) of the current thread
-- `v` - Print local variables in the current stack frame
-- `q` - Kill the debugged process and exit
+### Interactive Commands
+
+| Key | Action                                                            |
+| :-- | :---------------------------------------------------------------- |
+| `r` | **Run** the program (auto-breaks on `main` if no breakpoints set) |
+| `b` | Add a **breakpoint** (enter name/file:line)                       |
+| `p` | **Print** variable value                                          |
+| `n` | **Step over**                                                     |
+| `s` | **Step into**                                                     |
+| `o` | **Step out**                                                      |
+| `c` | **Continue** execution                                            |
+| `q` | **Quit** debugger                                                 |
+
+### Input Mode
+
+When adding breakpoints or printing variables:
+- `Enter`: Confirm input
+- `Esc`: Cancel and return to normal mode
+
+### Tips & Troubleshooting
+
+- **Logs**: The debugger redirects `stderr` to `tdbg.log`. Check this file if
+  something isn't working as expected.
+- **Missing Source**: If the debugger enters a function without source (like a
+  library call), it will fallback to disassembly. Use `n` (Step Over) or `o`
+  (Step Out) to get back to your code.
+
+### Type mappings
+
+| Type          | Mapping                   |
+| :------------ | :------------------------ |
+| Pointer       | `p`                       |
+| Reference     | `&`                       |
+| Array         | `a`                       |
+| Integer (int) | `i`                       |
+| Char          | `c`                       |
+| Float         | `f`                       |
+| Double        | `d`                       |
+| Bool          | `b`                       |
+| Long          | `l`                       |
+| Short         | `s`                       |
+| Struct        | `s`                       |
+| Class         | `c`                       |
+| Void          | `v`                       |
+| Default       | First letter of type name |
+
+> [!NOTE]
+> Some symbols are shared (e.g., `s` for both Short and Struct, `c` for both
+> Char and Class).
+
+## Acknowledgment
+
+- https://github.com/termbox/termbox2
+
