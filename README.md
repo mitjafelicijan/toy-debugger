@@ -16,7 +16,7 @@ After you clone the repository build the debugger and a sample program with
 
 Then run the debugger with example program with `./tdbg example`.
 
-## Available commands:
+## Available commands
 
 - `c` - Continue execution until the next breakpoint or stop
 - `s` - Step into the next instruction/function
