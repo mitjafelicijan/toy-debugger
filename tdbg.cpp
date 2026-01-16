@@ -22,6 +22,10 @@ const int STATUS_WINDOW_HEIGHT = 1;
 const int BREAKPOINTS_WINDOW_HEIGHT = 10;
 const int SIDEBAR_WIDTH = 40;
 
+// https://unicodeplus.com/U+2593
+const uint32_t SCROLLBAR_THUMB = 0x2593; // Dark shade
+const uint32_t SCROLLBAR_LINE = 0x2502;  // Vertical line
+
 struct LLDBGuard {
 	LLDBGuard() { SBDebugger::Initialize(); }
 	~LLDBGuard() { SBDebugger::Terminate(); }
@@ -54,6 +58,13 @@ enum AppMode {
 	MODE_NORMAL,
 	MODE_INPUT_BREAKPOINT,
 	MODE_INPUT_VARIABLE
+};
+
+struct VarLine {
+	std::string text;
+	int indent;
+	int prefix_start;
+	int prefix_end;
 };
 
 std::string get_timestamp() {
@@ -145,8 +156,8 @@ char get_type_char(SBType type) {
 	return '?';
 }
 
-void draw_variable_recursive(SBValue val, int indent, int x, int start_y, int &current_offset, int max_height, int width) {
-	if (current_offset >= max_height || indent > 3) return;
+void collect_variables_recursive(SBValue val, int indent, std::vector<VarLine>& lines, int width) {
+	if (indent > 3) return;
 
 	std::string original_name = val.GetName() ? val.GetName() : "";
 	char type_char = get_type_char(val.GetType());
@@ -161,26 +172,20 @@ void draw_variable_recursive(SBValue val, int indent, int x, int start_y, int &c
 	std::string content = original_name;
 	if (!value.empty()) content += " = " + value;
 
-	std::string line = indent_str + prefix + content;
-	if ((int)line.length() > width) line = line.substr(0, width - 3) + "...";
+	std::string line_text = indent_str + prefix + content;
+	if ((int)line_text.length() > width) line_text = line_text.substr(0, width - 3) + "...";
 
-	int prefix_start = indent * 2;
-	int prefix_end = prefix_start + 4; // length of "(x) "
-
-	for (int i = 0; i < (int)line.length(); ++i) {
-		uint16_t fg = TB_DEFAULT;
-		if (i >= prefix_start && i < prefix_end) {
-			fg = TB_BLACK | TB_BOLD;
-		}
-		tb_set_cell(x + i, start_y + current_offset, line[i], fg, TB_DEFAULT);
-	}
-
-	current_offset++;
+	VarLine vl;
+	vl.text = line_text;
+	vl.indent = indent;
+	vl.prefix_start = indent * 2;
+	vl.prefix_end = vl.prefix_start + 4; // length of "(x) "
+	lines.push_back(vl);
 
 	if (val.GetNumChildren() > 0) {
 		uint32_t n = val.GetNumChildren();
 		for (uint32_t i = 0; i < n; ++i) {
-			draw_variable_recursive(val.GetChildAtIndex(i), indent + 1, x, start_y, current_offset, max_height, width);
+			collect_variables_recursive(val.GetChildAtIndex(i), indent + 1, lines, width);
 		}
 	}
 }
@@ -210,7 +215,7 @@ void format_variable_log(SBValue val, std::vector<std::string>& log_buffer, int 
 	}
 }
 
-void draw_variables_view(SBFrame &frame, int x, int y, int w, int h) {
+void draw_variables_view(SBFrame &frame, int x, int y, int w, int h, int scroll_offset) {
 	draw_box(x, y, w, h, "Locals");
 
 	// Content area
@@ -224,11 +229,45 @@ void draw_variables_view(SBFrame &frame, int x, int y, int w, int h) {
 		return;
 	}
 
+	std::vector<VarLine> lines;
 	SBValueList vars = frame.GetVariables(true, true, false, true);
-	int current_offset = 0;
-
 	for (uint32_t i = 0; i < vars.GetSize(); ++i) {
-		draw_variable_recursive(vars.GetValueAtIndex(i), 0, cx, cy, current_offset, ch, cw);
+		collect_variables_recursive(vars.GetValueAtIndex(i), 0, lines, cw);
+	}
+
+	int total_lines = (int)lines.size();
+	int display_count = std::min(total_lines, ch);
+
+	for (int i = 0; i < display_count; ++i) {
+		int line_idx = scroll_offset + i;
+		if (line_idx < 0 || line_idx >= total_lines) continue;
+
+		const VarLine& vl = lines[line_idx];
+		for (int j = 0; j < (int)vl.text.length() && j < cw; ++j) {
+			uint16_t fg = TB_DEFAULT;
+			if (j >= vl.prefix_start && j < vl.prefix_end) {
+				fg = TB_BLACK | TB_BOLD;
+			}
+			tb_set_cell(cx + j, cy + i, vl.text[j], fg, TB_DEFAULT);
+		}
+	}
+
+	// Draw scrollbar
+	if (total_lines > ch) {
+		int thumb_height = std::max(1, (ch * ch) / total_lines);
+		int max_scroll = total_lines - ch;
+		double scroll_percent = (double)scroll_offset / (double)max_scroll;
+		int thumb_pos = (ch - thumb_height) * scroll_percent;
+
+		for (int i = 0; i < ch; ++i) {
+			uint32_t cell_char = SCROLLBAR_LINE;
+			uint16_t fg = TB_DEFAULT;
+			if (i >= thumb_pos && i < thumb_pos + thumb_height) {
+				cell_char = SCROLLBAR_THUMB;
+				fg = TB_WHITE;
+			}
+			tb_set_cell(x + w - 1, cy + i, cell_char, fg, TB_DEFAULT);
+		}
 	}
 }
 
@@ -268,7 +307,7 @@ std::string get_breakpoint_name(SBBreakpoint bp) {
 	return name;
 }
 
-void draw_source_view(SBFrame &frame, int x, int y, int w, int h, SourceCache& cache) {
+void draw_source_view(SBFrame &frame, int x, int y, int w, int h, SourceCache& cache, int scroll_offset) {
 	draw_box(x, y, w, h, "Source");
 
 	int cx = x + 1;
@@ -336,17 +375,11 @@ void draw_source_view(SBFrame &frame, int x, int y, int w, int h, SourceCache& c
 		return;
 	}
 
+	int total_lines = (int)lines.size();
 	int current_line = line_entry.GetLine();
-	int half_height = ch / 2;
-	int start_line = std::max(1, current_line - half_height);
-	int end_line = std::min((int)lines.size(), start_line + ch - 1);
-	if (end_line - start_line + 1 < ch) {
-		start_line = std::max(1, end_line - ch + 1);
-	}
-
 	for (int i = 0; i < ch; ++i) {
-		int line_idx = start_line + i;
-		if (line_idx > end_line) break;
+		int line_idx = scroll_offset + i + 1;
+		if (line_idx > total_lines) break;
 
 		std::string src = lines[line_idx - 1];
 		// Handle basic tab expansion (simple version)
@@ -378,6 +411,24 @@ void draw_source_view(SBFrame &frame, int x, int y, int w, int h, SourceCache& c
 			for (int k = cx + num_str.length() + src.length(); k < cx + cw; ++k) {
 				tb_set_cell(k, cy + i, ' ', fg, bg);
 			}
+		}
+	}
+
+	// Draw scrollbar
+	if (total_lines > ch) {
+		int thumb_height = std::max(1, (ch * ch) / total_lines);
+		int max_scroll = total_lines - ch;
+		double scroll_percent = (double)scroll_offset / (double)max_scroll;
+		int thumb_pos = (ch - thumb_height) * scroll_percent;
+
+		for (int i = 0; i < ch; ++i) {
+			uint32_t cell_char = SCROLLBAR_LINE;
+			uint16_t fg = TB_DEFAULT;
+			if (i >= thumb_pos && i < thumb_pos + thumb_height) {
+				cell_char = SCROLLBAR_THUMB;
+				fg = TB_WHITE;
+			}
+			tb_set_cell(x + w - 1, cy + i, cell_char, fg, TB_DEFAULT);
 		}
 	}
 }
@@ -421,9 +472,12 @@ SBBreakpoint create_breakpoint(SBTarget& target, const std::string& input) {
 	return target.BreakpointCreateByName(input.c_str());
 }
 
-void draw_log_view(int x, int y, int w, int h, const std::vector<std::string>& log_buffer, AppMode mode, const std::string& input_buffer) {
+void draw_log_view(int x, int y, int w, int h, const std::vector<std::string>& log_buffer, AppMode mode, const std::string& input_buffer, int scroll_offset) {
 	bool input_mode = (mode == MODE_INPUT_BREAKPOINT || mode == MODE_INPUT_VARIABLE);
-	std::string title = input_mode ? "Input (Esc to Cancel)" : "Command & Log";
+	std::string title = input_mode ? "Input (Esc to Cancel)" : "Logs";
+	if (!input_mode && scroll_offset > 0) {
+		title += " (Scrolled up: " + std::to_string(scroll_offset) + ")";
+	}
 	draw_box(x, y, w, h, title);
 
 	int cx = x + 1;
@@ -441,12 +495,35 @@ void draw_log_view(int x, int y, int w, int h, const std::vector<std::string>& l
 		draw_text(cx, cy, TB_WHITE | TB_BOLD, TB_DEFAULT, prompt);
 		tb_set_cell(cx + prompt.length(), cy, '_', TB_WHITE | TB_BOLD | TB_REVERSE, TB_DEFAULT);
 	} else {
-		int log_lines_count = std::min((int)log_buffer.size(), ch);
-		for (int i = 0; i < log_lines_count; ++i) {
-			const std::string& msg = log_buffer[log_buffer.size() - log_lines_count + i];
+		int total_logs = log_buffer.size();
+		int display_count = std::min(total_logs, ch);
+
+		for (int i = 0; i < display_count; ++i) {
+			int log_idx = total_logs - display_count - scroll_offset + i;
+			if (log_idx < 0 || log_idx >= total_logs) continue;
+
+			const std::string& msg = log_buffer[log_idx];
 			std::string disp = msg;
 			if ((int)disp.length() > cw) disp = disp.substr(0, cw);
 			draw_text(cx, cy + i, TB_DEFAULT, TB_DEFAULT, disp);
+		}
+
+		// Draw scrollbar
+		if (total_logs > ch) {
+			int thumb_height = std::max(1, (ch * ch) / total_logs);
+			int max_scroll = total_logs - ch;
+			double scroll_percent = (double)scroll_offset / (double)max_scroll;
+			int thumb_pos = (ch - thumb_height) * (1.0 - scroll_percent);
+
+			for (int i = 0; i < ch; ++i) {
+				uint32_t cell_char = SCROLLBAR_LINE;
+				uint16_t fg = TB_DEFAULT;
+				if (i >= thumb_pos && i < thumb_pos + thumb_height) {
+					cell_char = SCROLLBAR_THUMB;
+					fg = TB_WHITE;
+				}
+				tb_set_cell(x + w - 1, cy + i, cell_char, fg, TB_DEFAULT);
+			}
 		}
 	}
 }
@@ -507,8 +584,14 @@ int main(int argc, char** argv) {
 	AppMode mode = MODE_NORMAL;
 	std::string input_buffer;
 	std::vector<std::string> log_buffer;
+	int log_scroll_offset = 0;
+	int locals_scroll_offset = 0;
+	int source_scroll_offset = 0;
+	uint64_t last_pc = 0;
 	SourceCache source_cache;
 	log_buffer.push_back("Debugger started. Press 'b' to add breakpoint, 'r' to run.");
+
+	tb_set_input_mode(TB_INPUT_ESC | TB_INPUT_MOUSE);
 
 	while (running) {
 		tb_clear();
@@ -524,13 +607,35 @@ int main(int argc, char** argv) {
 			thread = process.GetSelectedThread();
 			if (thread.IsValid()) {
 				frame = thread.GetSelectedFrame();
+				if (frame.IsValid()) {
+					uint64_t current_pc = frame.GetPC();
+					if (current_pc != last_pc) {
+						last_pc = current_pc;
+						SBLineEntry le = frame.GetLineEntry();
+						if (le.IsValid()) {
+							std::string fullpath;
+							if (le.GetFileSpec().GetDirectory()) {
+								fullpath = std::string(le.GetFileSpec().GetDirectory()) + "/" + le.GetFileSpec().GetFilename();
+							} else {
+								fullpath = le.GetFileSpec().GetFilename();
+							}
+							const std::vector<std::string>& lines = source_cache.get_lines(fullpath);
+							int total_lines = (int)lines.size();
+							int ch = main_window_height - 2;
+							source_scroll_offset = std::max(0, (int)le.GetLine() - ch / 2 - 1);
+							if (source_scroll_offset + ch > total_lines) {
+								source_scroll_offset = std::max(0, total_lines - ch);
+							}
+						}
+					}
+				}
 			}
 		}
 
-		draw_source_view(frame, 0, 0, split_x, main_window_height, source_cache);
-		draw_variables_view(frame, split_x, 0, SIDEBAR_WIDTH, locals_window_height);
+		draw_source_view(frame, 0, 0, split_x, main_window_height, source_cache, source_scroll_offset);
+		draw_variables_view(frame, split_x, 0, SIDEBAR_WIDTH, locals_window_height, locals_scroll_offset);
 		draw_breakpoints_view(target, split_x, locals_window_height, SIDEBAR_WIDTH, BREAKPOINTS_WINDOW_HEIGHT);
-		draw_log_view(0, main_window_height, width, LOG_WINDOW_HEIGHT, log_buffer, mode, input_buffer);
+		draw_log_view(0, main_window_height, width, LOG_WINDOW_HEIGHT, log_buffer, mode, input_buffer, log_scroll_offset);
 		draw_status_bar(process, mode, width, height);
 
 		tb_present();
@@ -611,6 +716,74 @@ int main(int argc, char** argv) {
 						if (!input_buffer.empty()) input_buffer.pop_back();
 					} else if (ev.ch != 0) {
 						input_buffer += (char)ev.ch;
+					}
+				}
+			} else if (ev.type == TB_EVENT_MOUSE) {
+				int main_window_height = tb_height() - LOG_WINDOW_HEIGHT - STATUS_WINDOW_HEIGHT;
+				int log_start_y = main_window_height;
+				int log_end_y = tb_height() - STATUS_WINDOW_HEIGHT;
+
+				if (ev.y >= log_start_y && ev.y < log_end_y) {
+					if (ev.key == TB_KEY_MOUSE_WHEEL_UP) {
+						int max_scroll = std::max(0, (int)log_buffer.size() - (LOG_WINDOW_HEIGHT - 2));
+						if (log_scroll_offset < max_scroll) {
+							log_scroll_offset++;
+						}
+					} else if (ev.key == TB_KEY_MOUSE_WHEEL_DOWN) {
+						if (log_scroll_offset > 0) {
+							log_scroll_offset--;
+						}
+					}
+				}
+
+				// Source window scrolling
+				if (ev.x < split_x && ev.y < main_window_height) {
+					SBLineEntry le = frame.GetLineEntry();
+					if (le.IsValid()) {
+						std::string fullpath;
+						if (le.GetFileSpec().GetDirectory()) {
+							fullpath = std::string(le.GetFileSpec().GetDirectory()) + "/" + le.GetFileSpec().GetFilename();
+						} else {
+							fullpath = le.GetFileSpec().GetFilename();
+						}
+						const std::vector<std::string>& lines = source_cache.get_lines(fullpath);
+						int total_lines = (int)lines.size();
+						int ch = main_window_height - 2;
+						int max_scroll = std::max(0, total_lines - ch);
+
+						if (ev.key == TB_KEY_MOUSE_WHEEL_UP) {
+							if (source_scroll_offset > 0) {
+								source_scroll_offset--;
+							}
+						} else if (ev.key == TB_KEY_MOUSE_WHEEL_DOWN) {
+							if (source_scroll_offset < max_scroll) {
+								source_scroll_offset++;
+							}
+						}
+					}
+				}
+
+				// Locals window scrolling
+				int split_x = tb_width() - SIDEBAR_WIDTH;
+				int locals_window_height = main_window_height - BREAKPOINTS_WINDOW_HEIGHT;
+				if (ev.x >= split_x && ev.y < locals_window_height) {
+					std::vector<VarLine> lines;
+					if (frame.IsValid()) {
+						SBValueList vars = frame.GetVariables(true, true, false, true);
+						for (uint32_t i = 0; i < vars.GetSize(); ++i) {
+							collect_variables_recursive(vars.GetValueAtIndex(i), 0, lines, SIDEBAR_WIDTH - 2);
+						}
+					}
+					int max_scroll = std::max(0, (int)lines.size() - (locals_window_height - 2));
+
+					if (ev.key == TB_KEY_MOUSE_WHEEL_UP) {
+						if (locals_scroll_offset > 0) {
+							locals_scroll_offset--;
+						}
+					} else if (ev.key == TB_KEY_MOUSE_WHEEL_DOWN) {
+						if (locals_scroll_offset < max_scroll) {
+							locals_scroll_offset++;
+						}
 					}
 				}
 			}
