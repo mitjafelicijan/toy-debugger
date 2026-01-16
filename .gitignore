@@ -1,3 +1,5 @@
 example
 tdbg
 *.log
+example.dSYM/
+.DS_Store
