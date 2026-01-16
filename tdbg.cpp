@@ -26,6 +26,12 @@ const int SIDEBAR_WIDTH = 40;
 const uint32_t SCROLLBAR_THUMB = 0x2593; // Dark shade
 const uint32_t SCROLLBAR_LINE = 0x2502;  // Vertical line
 
+enum InputMode {
+	INPUT_MODE_NORMAL,
+	INPUT_MODE_BREAKPOINT,
+	INPUT_MODE_VARIABLE
+};
+
 struct LLDBGuard {
 	LLDBGuard() { SBDebugger::Initialize(); }
 	~LLDBGuard() { SBDebugger::Terminate(); }
@@ -52,12 +58,6 @@ struct SourceCache {
 		}
 		return lines;
 	}
-};
-
-enum AppMode {
-	MODE_NORMAL,
-	MODE_INPUT_BREAKPOINT,
-	MODE_INPUT_VARIABLE
 };
 
 struct VarLine {
@@ -472,8 +472,8 @@ SBBreakpoint create_breakpoint(SBTarget& target, const std::string& input) {
 	return target.BreakpointCreateByName(input.c_str());
 }
 
-void draw_log_view(int x, int y, int w, int h, const std::vector<std::string>& log_buffer, AppMode mode, const std::string& input_buffer, int scroll_offset) {
-	bool input_mode = (mode == MODE_INPUT_BREAKPOINT || mode == MODE_INPUT_VARIABLE);
+void draw_log_view(int x, int y, int w, int h, const std::vector<std::string>& log_buffer, InputMode mode, const std::string& input_buffer, int scroll_offset) {
+	bool input_mode = (mode == INPUT_MODE_BREAKPOINT || mode == INPUT_MODE_VARIABLE);
 	std::string title = input_mode ? "Input (Esc to Cancel)" : "Logs";
 	if (!input_mode && scroll_offset > 0) {
 		title += " (Scrolled up: " + std::to_string(scroll_offset) + ")";
@@ -487,8 +487,8 @@ void draw_log_view(int x, int y, int w, int h, const std::vector<std::string>& l
 
 	if (input_mode) {
 		std::string prompt;
-		if (mode == MODE_INPUT_BREAKPOINT) prompt = "Add Breakpoint: ";
-		else if (mode == MODE_INPUT_VARIABLE) prompt = "Print Variable: ";
+		if (mode == INPUT_MODE_BREAKPOINT) prompt = "Add Breakpoint: ";
+		else if (mode == INPUT_MODE_VARIABLE) prompt = "Print Variable: ";
 
 		prompt += input_buffer;
 		if ((int)prompt.length() > cw) prompt = prompt.substr(prompt.length() - cw);
@@ -528,7 +528,7 @@ void draw_log_view(int x, int y, int w, int h, const std::vector<std::string>& l
 	}
 }
 
-void draw_status_bar(SBProcess &process, AppMode mode, int width, int height) {
+void draw_status_bar(SBProcess &process, InputMode mode, int width, int height) {
 	std::string state_str = "Status: ";
 	if (!process.IsValid()) {
 		state_str += "Not Running";
@@ -540,7 +540,7 @@ void draw_status_bar(SBProcess &process, AppMode mode, int width, int height) {
 		else state_str += "Unknown";
 	}
 
-	state_str += (mode == MODE_NORMAL)
+	state_str += (mode == INPUT_MODE_NORMAL)
 		? " | r=Run, b=Add breakpoint, p=Print, n=Step Over, s=Step Into, o=Step Out, c=Continue, q=Quit"
 		: " | Enter=Confirm, Esc=Cancel";
 
@@ -581,7 +581,7 @@ int main(int argc, char** argv) {
 	TermboxGuard tb_guard;
 
 	bool running = true;
-	AppMode mode = MODE_NORMAL;
+	InputMode mode = INPUT_MODE_NORMAL;
 	std::string input_buffer;
 	std::vector<std::string> log_buffer;
 	int log_scroll_offset = 0;
@@ -643,7 +643,7 @@ int main(int argc, char** argv) {
 		struct tb_event ev;
 		if (tb_poll_event(&ev) == 0) {
 			if (ev.type == TB_EVENT_KEY) {
-				if (mode == MODE_NORMAL) {
+				if (mode == INPUT_MODE_NORMAL) {
 					if (ev.ch == 'q') {
 						running = false;
 					} else if (ev.ch == 'r') {
@@ -664,10 +664,10 @@ int main(int argc, char** argv) {
 							log_msg(log_buffer, "Already running");
 						}
 					} else if (ev.ch == 'b') {
-						mode = MODE_INPUT_BREAKPOINT;
+						mode = INPUT_MODE_BREAKPOINT;
 						input_buffer.clear();
 					} else if (ev.ch == 'p') {
-						mode = MODE_INPUT_VARIABLE;
+						mode = INPUT_MODE_VARIABLE;
 						input_buffer.clear();
 					} else {
 						if (process.IsValid() && process.GetState() == eStateStopped) {
@@ -679,20 +679,20 @@ int main(int argc, char** argv) {
 							}
 						}
 					}
-				} else if (mode == MODE_INPUT_BREAKPOINT || mode == MODE_INPUT_VARIABLE) {
+				} else if (mode == INPUT_MODE_BREAKPOINT || mode == INPUT_MODE_VARIABLE) {
 					if (ev.key == TB_KEY_ESC) {
-						mode = MODE_NORMAL;
+						mode = INPUT_MODE_NORMAL;
 						input_buffer.clear();
 					} else if (ev.key == TB_KEY_ENTER) {
 						if (!input_buffer.empty()) {
-							if (mode == MODE_INPUT_BREAKPOINT) {
+							if (mode == INPUT_MODE_BREAKPOINT) {
 								SBBreakpoint bp = create_breakpoint(target, input_buffer);
 								if (bp.IsValid() && bp.GetNumLocations() > 0) {
 									log_msg(log_buffer, "Breakpoint added: " + input_buffer);
 								} else {
 									log_msg(log_buffer, "Failed/Invalid breakpoint: " + input_buffer);
 								}
-							} else if (mode == MODE_INPUT_VARIABLE) {
+							} else if (mode == INPUT_MODE_VARIABLE) {
 								if (!frame.IsValid()) {
 									log_msg(log_buffer, "Error: No stack frame available to evaluate '" + input_buffer + "'");
 								} else {
@@ -710,7 +710,7 @@ int main(int argc, char** argv) {
 								}
 							}
 						}
-						mode = MODE_NORMAL;
+						mode = INPUT_MODE_NORMAL;
 						input_buffer.clear();
 					} else if (ev.key == TB_KEY_BACKSPACE || ev.key == TB_KEY_BACKSPACE2) {
 						if (!input_buffer.empty()) input_buffer.pop_back();
