@@ -7,7 +7,7 @@ debugger.
 > This is a work in progress and is not a production-ready debugger. I wrote
 > this to learn how to use the LLDB C++ API.
 
-https://github.com/user-attachments/assets/677f69fd-c5fe-402c-9342-3304547b29aa
+https://github.com/user-attachments/assets/a42057f5-1899-416a-a408-e38efef89866
 
 ## Requirements
 
