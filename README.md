@@ -3,6 +3,8 @@
 This project demonstrates how to use the LLDB C++ API to build a very basic
 debugger tool.
 
+https://github.com/user-attachments/assets/677f69fd-c5fe-402c-9342-3304547b29aa
+
 ## Requirements
 
 ```sh
@@ -22,7 +24,3 @@ Then run the debugger with example program with `./tdbg example`.
 - `bt` - Print a backtrace (call stack) of the current thread
 - `v` - Print local variables in the current stack frame
 - `q` - Kill the debugged process and exit
-
-## Preview
-
-https://github.com/user-attachments/assets/677f69fd-c5fe-402c-9342-3304547b29aa
