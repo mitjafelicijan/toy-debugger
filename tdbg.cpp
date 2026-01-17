@@ -33,7 +33,8 @@ enum InputMode {
 	INPUT_MODE_NORMAL,
 	INPUT_MODE_BREAKPOINT,
 	INPUT_MODE_VARIABLE,
-	INPUT_MODE_WATCH
+	INPUT_MODE_WATCH,
+	INPUT_MODE_HELP
 };
 
 struct LLDBGuard {
@@ -647,6 +648,47 @@ void draw_log_view(int x, int y, int w, int h, const std::vector<std::string>& l
 	}
 }
 
+void draw_help_view(int width, int height) {
+	int w = 60;
+	int h = 18;
+	int x = (width - w) / 2;
+	int y = (height - h) / 2;
+
+	// Fill background
+	for (int i = 0; i < h; ++i) {
+		for (int j = 0; j < w; ++j) {
+			tb_set_cell(x + j, y + i, ' ', TB_DEFAULT, TB_DEFAULT);
+		}
+	}
+
+	draw_box(x, y, w, h, "Help / Keybinds");
+
+	int ty = y + 2;
+	int tx = x + 3;
+	
+	auto d = [&](const std::string& key, const std::string& desc) {
+		draw_text(tx, ty, TB_YELLOW | TB_BOLD, TB_DEFAULT, key);
+		draw_text(tx + 13, ty, TB_DEFAULT, TB_DEFAULT, desc);
+		ty++;
+	};
+
+	d("r", "Run / Launch program");
+	d("b", "Add breakpoint (file:line or func)");
+	d("p", "Print variable / Evaluate expr");
+	d("w", "Add watch expression");
+	d("n", "Step Over (next line)");
+	d("s", "Step Into (into function)");
+	d("o", "Step Out (to caller)");
+	d("c", "Continue execution");
+	d("h", "Toggle help window");
+	d("q", "Quit debugger");
+	d("Esc", "Cancel input / Close help");
+	d("Ctrl+Arrows", "Resize layout");
+	d("Mouse Wheel", "Scroll active window");
+
+	draw_text(x + (w - 24) / 2, y + h - 2, TB_BLACK, TB_WHITE, " Press any key to close ");
+}
+
 void draw_status_bar(SBProcess &process, InputMode mode, int width, int height) {
 	std::string state_str = "Status: ";
 	if (!process.IsValid()) {
@@ -660,8 +702,8 @@ void draw_status_bar(SBProcess &process, InputMode mode, int width, int height) 
 	}
 
 	state_str += (mode == INPUT_MODE_NORMAL)
-		? " | r=Run, b=Add breakpoint, p=Print, w=Watch, n=Step Over, s=Step Into, o=Step Out, c=Continue, Ctrl+Arrows=Resize, q=Quit"
-		: " | Enter=Confirm, Esc=Cancel";
+		? " | r=Run, b=Add bp, p=Print, w=Watch, n=Step, s=Step In, o=Step Out, c=Cont, h=Help, q=Quit"
+		: (mode == INPUT_MODE_HELP ? " | Press any key to close help" : " | Enter=Confirm, Esc=Cancel");
 
 	for (int x = 0; x < width; ++x) {
 		tb_set_cell(x, height - 1, ' ', TB_BLACK, TB_WHITE);
@@ -793,6 +835,10 @@ int main(int argc, char** argv) {
 		draw_breakpoints_view(target, split_x, main_window_height, layout_config.sidebar_width, layout_config.log_height);
 		draw_status_bar(process, mode, width, height);
 
+		if (mode == INPUT_MODE_HELP) {
+			draw_help_view(width, height);
+		}
+
 		tb_present();
 
 		struct tb_event ev;
@@ -859,6 +905,8 @@ int main(int argc, char** argv) {
 					} else if (ev.ch == 'w') {
 						mode = INPUT_MODE_WATCH;
 						input_buffer.clear();
+					} else if (ev.ch == 'h') {
+						mode = INPUT_MODE_HELP;
 					} else {
 						if (process.IsValid() && process.GetState() == eStateStopped) {
 							switch (ev.ch) {
@@ -920,6 +968,8 @@ int main(int argc, char** argv) {
 					} else if (ev.ch != 0) {
 						input_buffer += (char)ev.ch;
 					}
+				} else if (mode == INPUT_MODE_HELP) {
+					mode = INPUT_MODE_NORMAL;
 				}
 			} else if (ev.type == TB_EVENT_MOUSE) {
 				int main_window_height = tb_height() - layout_config.log_height - layout_config.status_height;
