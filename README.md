@@ -52,20 +52,20 @@ Example with auto run:
 
 | Key          | Action                                                            |
 | :----------- | :---------------------------------------------------------------- |
-| `r`          | **Run** the program (auto-breaks on `main` if no breakpoints set) |
-| `b`          | Add a **breakpoint** (enter name/file:line)                       |
-| `p`          | **Print** variable value                                          |
-| `n`          | **Step over**                                                     |
-| `s`          | **Step into**                                                     |
-| `o`          | **Step out**                                                      |
-| `c`          | **Continue** execution                                            |
-| `w`          | **Watch** expression                                              |
-| `h`          | **Toggle help view**                                              |
-| `Ctrl+Left`  | **Increases sidebar width**                                       |
-| `Ctrl+Right` | **Reduces sidebar width**                                         |
-| `Ctrl+Up`    | **Increases log height**                                          |
-| `Ctrl+Down`  | **Reduces log height**                                            |
-| `q`          | **Quit** debugger                                                 |
+| `r`          | Run the program (auto-breaks on `main` if no breakpoints set) |
+| `b`          | Add a breakpoint (enter name/file:line)                       |
+| `p`          | Print variable value                                          |
+| `n`          | Step over                                                     |
+| `s`          | Step into                                                     |
+| `o`          | Step out                                                      |
+| `c`          | Continue execution                                            |
+| `w`          | Watch expression                                              |
+| `h`          | Toggle help view                                              |
+| `Ctrl+Left`  | Increases sidebar width                                       |
+| `Ctrl+Right` | Reduces sidebar width                                         |
+| `Ctrl+Up`    | Increases log height                                          |
+| `Ctrl+Down`  | Reduces log height                                            |
+| `q`          | Quit debugger                                                 |
 
 ### Input Mode
 
