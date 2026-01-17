@@ -26,6 +26,13 @@ After you clone the repository build the debugger and a sample program with
 
 Run the debugger with: `./tdbg <target_executable>`
 
+Example with arguments and environment variables:
+
+```sh
+./tdbg ./example arg1 arg2 arg3
+./tdbg ./example -e MYENV=qwe -- arg1 arg2 arg3
+```
+
 ### Interactive Commands
 
 | Key | Action                                                            |
@@ -37,7 +44,10 @@ Run the debugger with: `./tdbg <target_executable>`
 | `s` | **Step into**                                                     |
 | `o` | **Step out**                                                      |
 | `c` | **Continue** execution                                            |
+| `w` | **Watch** expression                                              |
 | `q` | **Quit** debugger                                                 |
+| `>` | **Reduces sidebar width**                                         |
+| `<` | **Increases sidebar width**                                       |
 
 ### Input Mode
 
