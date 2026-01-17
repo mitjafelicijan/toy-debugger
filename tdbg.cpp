@@ -17,10 +17,12 @@
 
 using namespace lldb;
 
-const int LOG_WINDOW_HEIGHT = 10;
-const int STATUS_WINDOW_HEIGHT = 1;
-const int BREAKPOINTS_WINDOW_HEIGHT = 10;
-const int SIDEBAR_WIDTH = 50;
+struct LayoutConfig {
+	int log_height = 10;
+	int status_height = 1;
+	int breakpoints_height = 10;
+	int sidebar_width = 50;
+} layout_config;
 
 // https://unicodeplus.com
 const uint32_t SCROLLBAR_THUMB = 0x2593; // Dark shade
@@ -165,10 +167,16 @@ void collect_variables_recursive(SBValue val, int indent, std::vector<VarLine>& 
 	char type_char = get_type_char(val.GetType());
 	std::string prefix = std::string("(") + type_char + ") ";
 
+	std::string val_str = val.GetValue() ? val.GetValue() : "";
+	std::string summary_str = val.GetSummary() ? val.GetSummary() : "";
 	std::string value;
+
 	if (!val.IsValid()) value = "(invalid)";
-	else if (val.GetValue()) value = val.GetValue();
-	else if (val.GetSummary()) value = val.GetSummary();
+	else {
+		if (!val_str.empty() && !summary_str.empty()) value = val_str + " " + summary_str;
+		else if (!val_str.empty()) value = val_str;
+		else if (!summary_str.empty()) value = summary_str;
+	}
 
 	std::string indent_str(indent * 2, ' ');
 	std::string content = original_name;
@@ -198,10 +206,16 @@ void format_variable_log(SBValue val, std::vector<std::string>& log_buffer, int 
 	std::string name = name_override.empty() ? (val.GetName() ? val.GetName() : "") : name_override;
 	char type_char = get_type_char(val.GetType());
 
+	std::string val_str = val.GetValue() ? val.GetValue() : "";
+	std::string summary_str = val.GetSummary() ? val.GetSummary() : "";
 	std::string value;
+
 	if (!val.IsValid()) value = "(invalid)";
-	else if (val.GetValue()) value = val.GetValue();
-	else if (val.GetSummary()) value = val.GetSummary();
+	else {
+		if (!val_str.empty() && !summary_str.empty()) value = val_str + " " + summary_str;
+		else if (!val_str.empty()) value = val_str;
+		else if (!summary_str.empty()) value = summary_str;
+	}
 
 	std::string indent_str(indent * 2, ' ');
 	std::string line = get_timestamp() + " " + indent_str + "(" + type_char + ") " + name;
@@ -588,8 +602,28 @@ void draw_status_bar(SBProcess &process, InputMode mode, int width, int height) 
 }
 
 int main(int argc, char** argv) {
-	if (argc < 2) {
-		std::cerr << "Usage: " << argv[0] << " <target_executable>\n";
+	std::vector<std::string> target_env;
+	std::vector<std::string> debuggee_args;
+	std::string target_path;
+
+	for (int i = 1; i < argc; ++i) {
+		std::string arg = argv[i];
+		if (arg == "-e" && i + 1 < argc) {
+			target_env.push_back(argv[++i]);
+		} else if (arg == "--") {
+			for (int j = i + 1; j < argc; ++j) {
+				debuggee_args.push_back(argv[j]);
+			}
+			break;
+		} else if (target_path.empty()) {
+			target_path = arg;
+		} else {
+			debuggee_args.push_back(arg);
+		}
+	}
+
+	if (target_path.empty()) {
+		std::cerr << "Usage: " << argv[0] << " [-e KEY=VALUE] ... <target_executable> [-- arg1 arg2 ...]\n";
 		return 1;
 	}
 
@@ -599,13 +633,11 @@ int main(int argc, char** argv) {
 		close(log_fd);
 	}
 
-	const char* target_path = argv[1];
-
 	LLDBGuard lldb_guard;
 	SBDebugger debugger = SBDebugger::Create();
 	debugger.SetAsync(false); 
 
-	SBTarget target = debugger.CreateTarget(target_path);
+	SBTarget target = debugger.CreateTarget(target_path.c_str());
 	if (!target.IsValid()) {
 		std::cerr << "Failed to create target for " << target_path << "\n";
 		return 1;
@@ -635,9 +667,9 @@ int main(int argc, char** argv) {
 
 		int width = tb_width();
 		int height = tb_height();
-		int main_window_height = height - LOG_WINDOW_HEIGHT - STATUS_WINDOW_HEIGHT;
-		int split_x = width - SIDEBAR_WIDTH;
-		int locals_window_height = main_window_height - BREAKPOINTS_WINDOW_HEIGHT;
+		int main_window_height = height - layout_config.log_height - layout_config.status_height;
+		int split_x = width - layout_config.sidebar_width;
+		int locals_window_height = main_window_height - layout_config.breakpoints_height;
 
 		SBFrame frame;
 		if (process.IsValid() && process.GetState() != eStateExited) {
@@ -672,9 +704,9 @@ int main(int argc, char** argv) {
 		}
 
 		draw_source_view(frame, 0, 0, split_x, main_window_height, source_cache, source_scroll_offset);
-		draw_variables_view(frame, split_x, 0, SIDEBAR_WIDTH, locals_window_height, locals_scroll_offset);
-		draw_breakpoints_view(target, split_x, locals_window_height, SIDEBAR_WIDTH, BREAKPOINTS_WINDOW_HEIGHT);
-		draw_log_view(0, main_window_height, width, LOG_WINDOW_HEIGHT, log_buffer, mode, input_buffer, log_scroll_offset);
+		draw_variables_view(frame, split_x, 0, layout_config.sidebar_width, locals_window_height, locals_scroll_offset);
+		draw_breakpoints_view(target, split_x, locals_window_height, layout_config.sidebar_width, layout_config.breakpoints_height);
+		draw_log_view(0, main_window_height, width, layout_config.log_height, log_buffer, mode, input_buffer, log_scroll_offset);
 		draw_status_bar(process, mode, width, height);
 
 		tb_present();
@@ -696,9 +728,37 @@ int main(int argc, char** argv) {
 								}
 							}
 							log_msg(log_buffer, "Launching...");
-							process = target.LaunchSimple(nullptr, nullptr, ".");
-							if (!process.IsValid()) log_msg(log_buffer, "Launch failed");
-							else log_msg(log_buffer, "Launched");
+
+							std::vector<const char*> launch_argv;
+							launch_argv.push_back(target_path.c_str());
+							for (const auto& arg : debuggee_args) {
+								launch_argv.push_back(arg.c_str());
+							}
+							launch_argv.push_back(nullptr);
+
+							std::vector<const char*> launch_env;
+							for (const auto& env : target_env) {
+								launch_env.push_back(env.c_str());
+							}
+							launch_env.push_back(nullptr);
+
+							SBLaunchInfo launch_info(launch_argv.data());
+							launch_info.SetEnvironmentEntries(launch_env.data(), true);
+							launch_info.SetWorkingDirectory(".");
+
+							SBError error;
+							process = target.Launch(launch_info, error);
+
+							if (!process.IsValid() || error.Fail()) {
+								std::string err_msg = "Launch failed";
+								if (error.GetCString()) {
+									err_msg += ": ";
+									err_msg += error.GetCString();
+								}
+								log_msg(log_buffer, err_msg);
+							} else {
+								log_msg(log_buffer, "Launched");
+							}
 						} else {
 							log_msg(log_buffer, "Already running");
 						}
@@ -719,6 +779,13 @@ int main(int argc, char** argv) {
 								case 's': if (thread.IsValid()) thread.StepInto(); break;
 								case 'o': if (thread.IsValid()) thread.StepOut(); break;
 								case 'c': process.Continue(); break;
+								case '<': layout_config.sidebar_width = std::min(width - 20, layout_config.sidebar_width + 2); break;
+								case '>': layout_config.sidebar_width = std::max(20, layout_config.sidebar_width - 2); break;
+							}
+						} else {
+							switch (ev.ch) {
+								case '<': layout_config.sidebar_width = std::min(width - 20, layout_config.sidebar_width + 2); break;
+								case '>': layout_config.sidebar_width = std::max(20, layout_config.sidebar_width - 2); break;
 							}
 						}
 					}
@@ -762,14 +829,14 @@ int main(int argc, char** argv) {
 					}
 				}
 			} else if (ev.type == TB_EVENT_MOUSE) {
-				int main_window_height = tb_height() - LOG_WINDOW_HEIGHT - STATUS_WINDOW_HEIGHT;
+				int main_window_height = tb_height() - layout_config.log_height - layout_config.status_height;
 
 				// Log window scrolling
 				int log_start_y = main_window_height;
-				int log_end_y = tb_height() - STATUS_WINDOW_HEIGHT;
+				int log_end_y = tb_height() - layout_config.status_height;
 				if (ev.y >= log_start_y && ev.y < log_end_y) {
 					if (ev.key == TB_KEY_MOUSE_WHEEL_UP) {
-						int max_scroll = std::max(0, (int)log_buffer.size() - (LOG_WINDOW_HEIGHT - 2));
+						int max_scroll = std::max(0, (int)log_buffer.size() - (layout_config.log_height - 2));
 						if (log_scroll_offset < max_scroll) {
 							log_scroll_offset++;
 						}
@@ -808,14 +875,14 @@ int main(int argc, char** argv) {
 				}
 
 				// Locals window scrolling
-				int split_x = tb_width() - SIDEBAR_WIDTH;
-				int locals_window_height = main_window_height - BREAKPOINTS_WINDOW_HEIGHT;
+				int split_x = tb_width() - layout_config.sidebar_width;
+				int locals_window_height = main_window_height - layout_config.breakpoints_height;
 				if (ev.x >= split_x && ev.y < locals_window_height) {
 					std::vector<VarLine> lines;
 					if (frame.IsValid()) {
 						SBValueList vars = frame.GetVariables(true, true, false, true);
 						for (uint32_t i = 0; i < vars.GetSize(); ++i) {
-							collect_variables_recursive(vars.GetValueAtIndex(i), 0, lines, SIDEBAR_WIDTH - 2);
+							collect_variables_recursive(vars.GetValueAtIndex(i), 0, lines, layout_config.sidebar_width - 2);
 						}
 					}
 					int max_scroll = std::max(0, (int)lines.size() - (locals_window_height - 2));
