@@ -771,6 +771,14 @@ int main(int argc, char** argv) {
 			startup_breakpoints.push_back(argv[++i]);
 		} else if (arg == "-run") {
 			auto_run = true;
+		} else if (arg == "-h" || arg == "--help") {
+			std::cout << "Usage: " << argv[0] << " [options] <target_executable> [-- arg1 arg2 ...]\n\n"
+					  << "Options:\n"
+					  << "  -e KEY=VALUE      Set environment variable\n"
+					  << "  -b BREAKPOINT     Set startup breakpoint (name or file:line)\n"
+					  << "  -run              Automatically run the target on startup\n"
+					  << "  -h, --help        Show this help message\n";
+			return 0;
 		} else if (arg == "--") {
 			for (int j = i + 1; j < argc; ++j) {
 				debuggee_args.push_back(argv[j]);
