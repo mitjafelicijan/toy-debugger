@@ -18,10 +18,10 @@
 using namespace lldb;
 
 struct LayoutConfig {
-	int log_height = 10;
 	int status_height = 1;
 	int watch_height = 15;
 	int sidebar_width = 50;
+	int log_height = 5;
 } layout_config;
 
 // https://unicodeplus.com
@@ -660,7 +660,7 @@ void draw_status_bar(SBProcess &process, InputMode mode, int width, int height) 
 	}
 
 	state_str += (mode == INPUT_MODE_NORMAL)
-		? " | r=Run, b=Add breakpoint, p=Print, w=Watch, n=Step Over, s=Step Into, o=Step Out, c=Continue, q=Quit"
+		? " | r=Run, b=Add breakpoint, p=Print, w=Watch, n=Step Over, s=Step Into, o=Step Out, c=Continue, Ctrl+Arrows=Resize, q=Quit"
 		: " | Enter=Confirm, Esc=Cancel";
 
 	for (int x = 0; x < width; ++x) {
@@ -866,14 +866,17 @@ int main(int argc, char** argv) {
 								case 's': if (thread.IsValid()) thread.StepInto(); break;
 								case 'o': if (thread.IsValid()) thread.StepOut(); break;
 								case 'c': process.Continue(); break;
-								case '<': layout_config.sidebar_width = std::min(width - 20, layout_config.sidebar_width + 2); break;
-								case '>': layout_config.sidebar_width = std::max(20, layout_config.sidebar_width - 2); break;
 							}
-						} else {
-							switch (ev.ch) {
-								case '<': layout_config.sidebar_width = std::min(width - 20, layout_config.sidebar_width + 2); break;
-								case '>': layout_config.sidebar_width = std::max(20, layout_config.sidebar_width - 2); break;
-							}
+						}
+						
+						if (ev.key == TB_KEY_ARROW_LEFT && (ev.mod & TB_MOD_CTRL)) {
+							layout_config.sidebar_width = std::min(width - 20, layout_config.sidebar_width + 2);
+						} else if (ev.key == TB_KEY_ARROW_RIGHT && (ev.mod & TB_MOD_CTRL)) {
+							layout_config.sidebar_width = std::max(20, layout_config.sidebar_width - 2);
+						} else if (ev.key == TB_KEY_ARROW_UP && (ev.mod & TB_MOD_CTRL)) {
+							layout_config.log_height = std::min(height - 10, layout_config.log_height + 1);
+						} else if (ev.key == TB_KEY_ARROW_DOWN && (ev.mod & TB_MOD_CTRL)) {
+							layout_config.log_height = std::max(5, layout_config.log_height - 1);
 						}
 					}
 				} else if (mode == INPUT_MODE_BREAKPOINT || mode == INPUT_MODE_VARIABLE || mode == INPUT_MODE_WATCH) {
