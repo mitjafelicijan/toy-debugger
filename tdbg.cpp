@@ -20,7 +20,7 @@ using namespace lldb;
 struct LayoutConfig {
 	int log_height = 10;
 	int status_height = 1;
-	int breakpoints_height = 10;
+	int watch_height = 15;
 	int sidebar_width = 50;
 } layout_config;
 
@@ -32,7 +32,8 @@ const uint32_t BREAKPOINT_CIRCLE = 0x25B6; // Filled triangle
 enum InputMode {
 	INPUT_MODE_NORMAL,
 	INPUT_MODE_BREAKPOINT,
-	INPUT_MODE_VARIABLE
+	INPUT_MODE_VARIABLE,
+	INPUT_MODE_WATCH
 };
 
 struct LLDBGuard {
@@ -160,10 +161,10 @@ char get_type_char(SBType type) {
 	return '?';
 }
 
-void collect_variables_recursive(SBValue val, int indent, std::vector<VarLine>& lines, int width) {
+void collect_variables_recursive(SBValue val, int indent, std::vector<VarLine>& lines, int width, const std::string& name_override = "") {
 	if (indent > 3) return;
 
-	std::string original_name = val.GetName() ? val.GetName() : "";
+	std::string original_name = name_override.empty() ? (val.GetName() ? val.GetName() : "") : name_override;
 	char type_char = get_type_char(val.GetType());
 	std::string prefix = std::string("(") + type_char + ") ";
 
@@ -503,6 +504,73 @@ void draw_breakpoints_view(SBTarget& target, int x, int y, int w, int h) {
 	}
 }
 
+void draw_watch_view(SBFrame& frame, int x, int y, int w, int h, const std::vector<std::string>& expressions, int scroll_offset) {
+	draw_box(x, y, w, h, "Watch");
+	int cx = x + 1;
+	int cy = y + 1;
+	int ch = h - 2;
+	int cw = w - 2;
+
+	if (expressions.empty()) {
+		draw_text(cx, cy, TB_DEFAULT, TB_DEFAULT, "No watch expressions.");
+		return;
+	}
+
+	std::vector<VarLine> lines;
+	for (const auto& expr : expressions) {
+		SBValue val = frame.EvaluateExpression(expr.c_str());
+		if (val.IsValid() && !val.GetError().Fail()) {
+			collect_variables_recursive(val, 0, lines, cw, expr);
+		} else {
+			VarLine vl;
+			vl.text = expr + " = (error)";
+			if (val.GetError().GetCString()) {
+				vl.text += ": " + std::string(val.GetError().GetCString());
+			}
+			if ((int)vl.text.length() > cw) vl.text = vl.text.substr(0, cw - 3) + "...";
+			vl.indent = 0;
+			vl.prefix_start = 0;
+			vl.prefix_end = 0;
+			lines.push_back(vl);
+		}
+	}
+
+	int total_lines = (int)lines.size();
+	int display_count = std::min(total_lines, ch);
+
+	for (int i = 0; i < display_count; ++i) {
+		int line_idx = scroll_offset + i;
+		if (line_idx < 0 || line_idx >= total_lines) continue;
+
+		const VarLine& vl = lines[line_idx];
+		for (int j = 0; j < (int)vl.text.length() && j < cw; ++j) {
+			uint16_t fg = TB_DEFAULT;
+			if (j >= vl.prefix_start && j < vl.prefix_end) {
+				fg = TB_BLACK | TB_BOLD;
+			}
+			tb_set_cell(cx + j, cy + i, vl.text[j], fg, TB_DEFAULT);
+		}
+	}
+
+	// Draw scrollbar
+	if (total_lines > ch) {
+		int thumb_height = std::max(1, (ch * ch) / total_lines);
+		int max_scroll = total_lines - ch;
+		double scroll_percent = (double)scroll_offset / (double)max_scroll;
+		int thumb_pos = (ch - thumb_height) * scroll_percent;
+
+		for (int i = 0; i < ch; ++i) {
+			uint32_t cell_char = SCROLLBAR_LINE;
+			uint16_t fg = TB_DEFAULT;
+			if (i >= thumb_pos && i < thumb_pos + thumb_height) {
+				cell_char = SCROLLBAR_THUMB;
+				fg = TB_WHITE;
+			}
+			tb_set_cell(x + w - 1, cy + i, cell_char, fg, TB_DEFAULT);
+		}
+	}
+}
+
 SBBreakpoint create_breakpoint(SBTarget& target, const std::string& input) {
 	SBBreakpoint bp;
 	size_t colon_pos = input.rfind(':');
@@ -523,7 +591,7 @@ SBBreakpoint create_breakpoint(SBTarget& target, const std::string& input) {
 }
 
 void draw_log_view(int x, int y, int w, int h, const std::vector<std::string>& log_buffer, InputMode mode, const std::string& input_buffer, int scroll_offset) {
-	bool input_mode = (mode == INPUT_MODE_BREAKPOINT || mode == INPUT_MODE_VARIABLE);
+	bool input_mode = (mode == INPUT_MODE_BREAKPOINT || mode == INPUT_MODE_VARIABLE || mode == INPUT_MODE_WATCH);
 	std::string title = input_mode ? "Input (Esc to Cancel)" : "Logs";
 	if (!input_mode && scroll_offset > 0) {
 		title += " (Scrolled up: " + std::to_string(scroll_offset) + ")";
@@ -539,6 +607,7 @@ void draw_log_view(int x, int y, int w, int h, const std::vector<std::string>& l
 		std::string prompt;
 		if (mode == INPUT_MODE_BREAKPOINT) prompt = "Add Breakpoint: ";
 		else if (mode == INPUT_MODE_VARIABLE) prompt = "Print Variable: ";
+		else if (mode == INPUT_MODE_WATCH) prompt = "Watch Variable: ";
 
 		prompt += input_buffer;
 		if ((int)prompt.length() > cw) prompt = prompt.substr(prompt.length() - cw);
@@ -591,7 +660,7 @@ void draw_status_bar(SBProcess &process, InputMode mode, int width, int height) 
 	}
 
 	state_str += (mode == INPUT_MODE_NORMAL)
-		? " | r=Run, b=Add breakpoint, p=Print, n=Step Over, s=Step Into, o=Step Out, c=Continue, q=Quit"
+		? " | r=Run, b=Add breakpoint, p=Print, w=Watch, n=Step Over, s=Step Into, o=Step Out, c=Continue, q=Quit"
 		: " | Enter=Confirm, Esc=Cancel";
 
 	for (int x = 0; x < width; ++x) {
@@ -653,8 +722,10 @@ int main(int argc, char** argv) {
 	std::string input_buffer;
 	std::string current_source_filename;
 	std::vector<std::string> log_buffer;
+	std::vector<std::string> watch_expressions;
 	int log_scroll_offset = 0;
 	int locals_scroll_offset = 0;
+	int watch_scroll_offset = 0;
 	int source_scroll_offset = 0;
 	uint64_t last_pc = 0;
 	SourceCache source_cache;
@@ -669,7 +740,7 @@ int main(int argc, char** argv) {
 		int height = tb_height();
 		int main_window_height = height - layout_config.log_height - layout_config.status_height;
 		int split_x = width - layout_config.sidebar_width;
-		int locals_window_height = main_window_height - layout_config.breakpoints_height;
+		int locals_window_height = main_window_height - layout_config.watch_height;
 
 		SBFrame frame;
 		if (process.IsValid() && process.GetState() != eStateExited) {
@@ -705,8 +776,9 @@ int main(int argc, char** argv) {
 
 		draw_source_view(frame, 0, 0, split_x, main_window_height, source_cache, source_scroll_offset);
 		draw_variables_view(frame, split_x, 0, layout_config.sidebar_width, locals_window_height, locals_scroll_offset);
-		draw_breakpoints_view(target, split_x, locals_window_height, layout_config.sidebar_width, layout_config.breakpoints_height);
-		draw_log_view(0, main_window_height, width, layout_config.log_height, log_buffer, mode, input_buffer, log_scroll_offset);
+		draw_watch_view(frame, split_x, locals_window_height, layout_config.sidebar_width, layout_config.watch_height, watch_expressions, watch_scroll_offset);
+		draw_log_view(0, main_window_height, split_x, layout_config.log_height, log_buffer, mode, input_buffer, log_scroll_offset);
+		draw_breakpoints_view(target, split_x, main_window_height, layout_config.sidebar_width, layout_config.log_height);
 		draw_status_bar(process, mode, width, height);
 
 		tb_present();
@@ -772,6 +844,9 @@ int main(int argc, char** argv) {
 					} else if (ev.ch == 'p') {
 						mode = INPUT_MODE_VARIABLE;
 						input_buffer.clear();
+					} else if (ev.ch == 'w') {
+						mode = INPUT_MODE_WATCH;
+						input_buffer.clear();
 					} else {
 						if (process.IsValid() && process.GetState() == eStateStopped) {
 							switch (ev.ch) {
@@ -789,7 +864,7 @@ int main(int argc, char** argv) {
 							}
 						}
 					}
-				} else if (mode == INPUT_MODE_BREAKPOINT || mode == INPUT_MODE_VARIABLE) {
+				} else if (mode == INPUT_MODE_BREAKPOINT || mode == INPUT_MODE_VARIABLE || mode == INPUT_MODE_WATCH) {
 					if (ev.key == TB_KEY_ESC) {
 						mode = INPUT_MODE_NORMAL;
 						input_buffer.clear();
@@ -818,6 +893,9 @@ int main(int argc, char** argv) {
 										log_msg(log_buffer, err);
 									}
 								}
+							} else if (mode == INPUT_MODE_WATCH) {
+								watch_expressions.push_back(input_buffer);
+								log_msg(log_buffer, "Added to watch: " + input_buffer);
 							}
 						}
 						mode = INPUT_MODE_NORMAL;
@@ -834,7 +912,7 @@ int main(int argc, char** argv) {
 				// Log window scrolling
 				int log_start_y = main_window_height;
 				int log_end_y = tb_height() - layout_config.status_height;
-				if (ev.y >= log_start_y && ev.y < log_end_y) {
+				if (ev.x < split_x && ev.y >= log_start_y && ev.y < log_end_y) {
 					if (ev.key == TB_KEY_MOUSE_WHEEL_UP) {
 						int max_scroll = std::max(0, (int)log_buffer.size() - (layout_config.log_height - 2));
 						if (log_scroll_offset < max_scroll) {
@@ -876,7 +954,7 @@ int main(int argc, char** argv) {
 
 				// Locals window scrolling
 				int split_x = tb_width() - layout_config.sidebar_width;
-				int locals_window_height = main_window_height - layout_config.breakpoints_height;
+				int locals_window_height = main_window_height - layout_config.watch_height;
 				if (ev.x >= split_x && ev.y < locals_window_height) {
 					std::vector<VarLine> lines;
 					if (frame.IsValid()) {
@@ -894,6 +972,32 @@ int main(int argc, char** argv) {
 					} else if (ev.key == TB_KEY_MOUSE_WHEEL_DOWN) {
 						if (locals_scroll_offset < max_scroll) {
 							locals_scroll_offset++;
+						}
+					}
+				}
+
+				// Watch window scrolling
+				if (ev.x >= split_x && ev.y >= locals_window_height && ev.y < main_window_height) {
+					std::vector<VarLine> lines;
+					for (const auto& expr : watch_expressions) {
+						SBValue val = frame.EvaluateExpression(expr.c_str());
+						if (val.IsValid() && !val.GetError().Fail()) {
+							collect_variables_recursive(val, 0, lines, layout_config.sidebar_width - 2, expr);
+						} else {
+							VarLine vl;
+							vl.text = expr + " = (error)";
+							lines.push_back(vl);
+						}
+					}
+					int max_scroll = std::max(0, (int)lines.size() - (layout_config.watch_height - 2));
+
+					if (ev.key == TB_KEY_MOUSE_WHEEL_UP) {
+						if (watch_scroll_offset > 0) {
+							watch_scroll_offset--;
+						}
+					} else if (ev.key == TB_KEY_MOUSE_WHEEL_DOWN) {
+						if (watch_scroll_offset < max_scroll) {
+							watch_scroll_offset++;
 						}
 					}
 				}
