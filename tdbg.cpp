@@ -619,6 +619,7 @@ int main(int argc, char** argv) {
 	bool running = true;
 	InputMode mode = INPUT_MODE_NORMAL;
 	std::string input_buffer;
+	std::string current_source_filename;
 	std::vector<std::string> log_buffer;
 	int log_scroll_offset = 0;
 	int locals_scroll_offset = 0;
@@ -652,8 +653,10 @@ int main(int argc, char** argv) {
 							std::string fullpath;
 							if (le.GetFileSpec().GetDirectory()) {
 								fullpath = std::string(le.GetFileSpec().GetDirectory()) + "/" + le.GetFileSpec().GetFilename();
+								current_source_filename = le.GetFileSpec().GetFilename();
 							} else {
 								fullpath = le.GetFileSpec().GetFilename();
+								current_source_filename = fullpath;
 							}
 							const std::vector<std::string>& lines = source_cache.get_lines(fullpath);
 							int total_lines = (int)lines.size();
@@ -701,7 +704,11 @@ int main(int argc, char** argv) {
 						}
 					} else if (ev.ch == 'b') {
 						mode = INPUT_MODE_BREAKPOINT;
-						input_buffer.clear();
+						if (!current_source_filename.empty()) {
+							input_buffer = current_source_filename + ":";
+						} else {
+							input_buffer.clear();
+						}
 					} else if (ev.ch == 'p') {
 						mode = INPUT_MODE_VARIABLE;
 						input_buffer.clear();
