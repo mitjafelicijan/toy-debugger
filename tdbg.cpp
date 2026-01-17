@@ -22,9 +22,10 @@ const int STATUS_WINDOW_HEIGHT = 1;
 const int BREAKPOINTS_WINDOW_HEIGHT = 10;
 const int SIDEBAR_WIDTH = 50;
 
-// https://unicodeplus.com/U+2593
+// https://unicodeplus.com
 const uint32_t SCROLLBAR_THUMB = 0x2593; // Dark shade
 const uint32_t SCROLLBAR_LINE = 0x2502;  // Vertical line
+const uint32_t BREAKPOINT_CIRCLE = 0x25B6; // Filled triangle
 
 enum InputMode {
 	INPUT_MODE_NORMAL,
@@ -376,6 +377,32 @@ void draw_source_view(SBFrame &frame, int x, int y, int w, int h, SourceCache& c
 		return;
 	}
 
+	// Get breakpoints for this file
+	std::vector<uint32_t> bp_lines;
+	uint32_t num_breakpoints = target.GetNumBreakpoints();
+	for (uint32_t i = 0; i < num_breakpoints; ++i) {
+		SBBreakpoint bp = target.GetBreakpointAtIndex(i);
+		uint32_t num_locs = bp.GetNumLocations();
+		for (uint32_t j = 0; j < num_locs; ++j) {
+			SBBreakpointLocation loc = bp.GetLocationAtIndex(j);
+			SBLineEntry le = loc.GetAddress().GetLineEntry();
+			if (le.IsValid()) {
+				SBFileSpec fs = le.GetFileSpec();
+				if (fs.IsValid()) {
+					std::string bp_path;
+					if (fs.GetDirectory()) {
+						bp_path = std::string(fs.GetDirectory()) + "/" + fs.GetFilename();
+					} else {
+						bp_path = fs.GetFilename();
+					}
+					if (bp_path == fullpath) {
+						bp_lines.push_back(le.GetLine());
+					}
+				}
+			}
+		}
+	}
+
 	int total_lines = (int)lines.size();
 	int current_line = line_entry.GetLine();
 	for (int i = 0; i < ch; ++i) {
@@ -392,6 +419,7 @@ void draw_source_view(SBFrame &frame, int x, int y, int w, int h, SourceCache& c
 		src = expanded;
 
 		bool is_current = (line_idx == current_line);
+		bool has_breakpoint = std::find(bp_lines.begin(), bp_lines.end(), (uint32_t)line_idx) != bp_lines.end();
 
 		char buf[32];
 		snprintf(buf, sizeof(buf), "%4d ", line_idx);
@@ -400,16 +428,23 @@ void draw_source_view(SBFrame &frame, int x, int y, int w, int h, SourceCache& c
 		uint16_t bg = is_current ? TB_BLUE : TB_DEFAULT;
 		uint16_t fg = is_current ? TB_WHITE | TB_BOLD : TB_DEFAULT;
 
-		draw_text(cx, cy + i, fg, bg, num_str);
+		// Draw breakpoint indicator
+		if (has_breakpoint) {
+			tb_set_cell(cx, cy + i, BREAKPOINT_CIRCLE, TB_RED | TB_BOLD, bg);
+		} else {
+			tb_set_cell(cx, cy + i, ' ', fg, bg);
+		}
 
-		int src_max_len = cw - (int)num_str.length();
+		draw_text(cx + 1, cy + i, fg, bg, num_str);
+
+		int src_max_len = cw - (int)num_str.length() - 1;
 		if ((int)src.length() > src_max_len) {
 			src = src.substr(0, src_max_len);
 		}
-		draw_text(cx + num_str.length(), cy + i, fg, bg, src);
+		draw_text(cx + 1 + num_str.length(), cy + i, fg, bg, src);
 
 		if (is_current) {
-			for (int k = cx + num_str.length() + src.length(); k < cx + cw; ++k) {
+			for (int k = cx + 1 + num_str.length() + src.length(); k < cx + cw; ++k) {
 				tb_set_cell(k, cy + i, ' ', fg, bg);
 			}
 		}
