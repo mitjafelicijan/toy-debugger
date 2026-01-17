@@ -40,6 +40,14 @@ Example with breakpoints:
 ./tdbg ./example -b example.c:54 -b example.c:60
 ```
 
+Example with auto run:
+
+```sh
+./tdbg -run ./example
+./tdbg -run ./example arg1 arg2 arg3
+./tdbg -run ./example -e MYENV=qwe -- arg1 arg2 arg3
+```
+
 ### Interactive Commands
 
 | Key | Action                                                            |

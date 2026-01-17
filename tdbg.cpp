@@ -665,7 +665,7 @@ void draw_help_view(int width, int height) {
 
 	int ty = y + 2;
 	int tx = x + 3;
-	
+
 	auto d = [&](const std::string& key, const std::string& desc) {
 		draw_text(tx, ty, TB_YELLOW | TB_BOLD, TB_DEFAULT, key);
 		draw_text(tx + 13, ty, TB_DEFAULT, TB_DEFAULT, desc);
@@ -712,11 +712,56 @@ void draw_status_bar(SBProcess &process, InputMode mode, int width, int height) 
 	draw_text(1, height - 1, TB_BLACK, TB_WHITE, state_str);
 }
 
+SBProcess launch_target(SBTarget& target, const std::string& target_path, const std::vector<std::string>& debuggee_args, const std::vector<std::string>& target_env, std::vector<std::string>& log_buffer) {
+	if (target.GetNumBreakpoints() == 0) {
+		SBBreakpoint bp = target.BreakpointCreateByName("main");
+		if (bp.IsValid() && bp.GetNumLocations() > 0) {
+			log_msg(log_buffer, "No breakpoints. Added breakpoint at 'main'");
+		} else {
+			log_msg(log_buffer, "No breakpoints. Failed to add breakpoint at 'main'");
+		}
+	}
+	log_msg(log_buffer, "Launching...");
+
+	std::vector<const char*> launch_argv;
+	launch_argv.push_back(target_path.c_str());
+	for (const auto& arg : debuggee_args) {
+		launch_argv.push_back(arg.c_str());
+	}
+	launch_argv.push_back(nullptr);
+
+	std::vector<const char*> launch_env;
+	for (const auto& env : target_env) {
+		launch_env.push_back(env.c_str());
+	}
+	launch_env.push_back(nullptr);
+
+	SBLaunchInfo launch_info(launch_argv.data());
+	launch_info.SetEnvironmentEntries(launch_env.data(), true);
+	launch_info.SetWorkingDirectory(".");
+
+	SBError error;
+	SBProcess process = target.Launch(launch_info, error);
+
+	if (!process.IsValid() || error.Fail()) {
+		std::string err_msg = "Launch failed";
+		if (error.GetCString()) {
+			err_msg += ": ";
+			err_msg += error.GetCString();
+		}
+		log_msg(log_buffer, err_msg);
+	} else {
+		log_msg(log_buffer, "Launched");
+	}
+	return process;
+}
+
 int main(int argc, char** argv) {
 	std::vector<std::string> target_env;
 	std::vector<std::string> startup_breakpoints;
 	std::vector<std::string> debuggee_args;
 	std::string target_path;
+	bool auto_run = false;
 
 	for (int i = 1; i < argc; ++i) {
 		std::string arg = argv[i];
@@ -724,6 +769,8 @@ int main(int argc, char** argv) {
 			target_env.push_back(argv[++i]);
 		} else if (arg == "-b" && i + 1 < argc) {
 			startup_breakpoints.push_back(argv[++i]);
+		} else if (arg == "-run") {
+			auto_run = true;
 		} else if (arg == "--") {
 			for (int j = i + 1; j < argc; ++j) {
 				debuggee_args.push_back(argv[j]);
@@ -737,7 +784,7 @@ int main(int argc, char** argv) {
 	}
 
 	if (target_path.empty()) {
-		std::cerr << "Usage: " << argv[0] << " [-e KEY=VALUE] [-b BREAKPOINT] ... <target_executable> [-- arg1 arg2 ...]\n";
+		std::cerr << "Usage: " << argv[0] << " [-e KEY=VALUE] [-b BREAKPOINT] [-run] ... <target_executable> [-- arg1 arg2 ...]\n";
 		return 1;
 	}
 
@@ -767,9 +814,12 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	SBProcess process; 
-	SBThread thread;
+	SBProcess process;
+	if (auto_run) {
+		process = launch_target(target, target_path, debuggee_args, target_env, log_buffer);
+	}
 
+	SBThread thread;
 	TermboxGuard tb_guard;
 
 	bool running = true;
@@ -848,47 +898,8 @@ int main(int argc, char** argv) {
 					if (ev.ch == 'q') {
 						running = false;
 					} else if (ev.ch == 'r') {
-						if (!process.IsValid()) {
-							if (target.GetNumBreakpoints() == 0) {
-								SBBreakpoint bp = target.BreakpointCreateByName("main");
-								if (bp.IsValid() && bp.GetNumLocations() > 0) {
-									log_msg(log_buffer, "No breakpoints. Added breakpoint at 'main'");
-								} else {
-									log_msg(log_buffer, "No breakpoints. Failed to add breakpoint at 'main'");
-								}
-							}
-							log_msg(log_buffer, "Launching...");
-
-							std::vector<const char*> launch_argv;
-							launch_argv.push_back(target_path.c_str());
-							for (const auto& arg : debuggee_args) {
-								launch_argv.push_back(arg.c_str());
-							}
-							launch_argv.push_back(nullptr);
-
-							std::vector<const char*> launch_env;
-							for (const auto& env : target_env) {
-								launch_env.push_back(env.c_str());
-							}
-							launch_env.push_back(nullptr);
-
-							SBLaunchInfo launch_info(launch_argv.data());
-							launch_info.SetEnvironmentEntries(launch_env.data(), true);
-							launch_info.SetWorkingDirectory(".");
-
-							SBError error;
-							process = target.Launch(launch_info, error);
-
-							if (!process.IsValid() || error.Fail()) {
-								std::string err_msg = "Launch failed";
-								if (error.GetCString()) {
-									err_msg += ": ";
-									err_msg += error.GetCString();
-								}
-								log_msg(log_buffer, err_msg);
-							} else {
-								log_msg(log_buffer, "Launched");
-							}
+						if (!process.IsValid() || process.GetState() == eStateExited) {
+							process = launch_target(target, target_path, debuggee_args, target_env, log_buffer);
 						} else {
 							log_msg(log_buffer, "Already running");
 						}
@@ -916,7 +927,7 @@ int main(int argc, char** argv) {
 								case 'c': process.Continue(); break;
 							}
 						}
-						
+
 						if (ev.key == TB_KEY_ARROW_LEFT && (ev.mod & TB_MOD_CTRL)) {
 							layout_config.sidebar_width = std::min(width - 20, layout_config.sidebar_width + 2);
 						} else if (ev.key == TB_KEY_ARROW_RIGHT && (ev.mod & TB_MOD_CTRL)) {
