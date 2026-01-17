@@ -672,6 +672,7 @@ void draw_status_bar(SBProcess &process, InputMode mode, int width, int height) 
 
 int main(int argc, char** argv) {
 	std::vector<std::string> target_env;
+	std::vector<std::string> startup_breakpoints;
 	std::vector<std::string> debuggee_args;
 	std::string target_path;
 
@@ -679,6 +680,8 @@ int main(int argc, char** argv) {
 		std::string arg = argv[i];
 		if (arg == "-e" && i + 1 < argc) {
 			target_env.push_back(argv[++i]);
+		} else if (arg == "-b" && i + 1 < argc) {
+			startup_breakpoints.push_back(argv[++i]);
 		} else if (arg == "--") {
 			for (int j = i + 1; j < argc; ++j) {
 				debuggee_args.push_back(argv[j]);
@@ -692,7 +695,7 @@ int main(int argc, char** argv) {
 	}
 
 	if (target_path.empty()) {
-		std::cerr << "Usage: " << argv[0] << " [-e KEY=VALUE] ... <target_executable> [-- arg1 arg2 ...]\n";
+		std::cerr << "Usage: " << argv[0] << " [-e KEY=VALUE] [-b BREAKPOINT] ... <target_executable> [-- arg1 arg2 ...]\n";
 		return 1;
 	}
 
@@ -712,6 +715,16 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
+	std::vector<std::string> log_buffer;
+	for (const auto& bp_spec : startup_breakpoints) {
+		SBBreakpoint bp = create_breakpoint(target, bp_spec);
+		if (bp.IsValid() && bp.GetNumLocations() > 0) {
+			log_msg(log_buffer, "Set startup breakpoint: " + bp_spec);
+		} else {
+			log_msg(log_buffer, "Failed to set startup breakpoint: " + bp_spec);
+		}
+	}
+
 	SBProcess process; 
 	SBThread thread;
 
@@ -721,7 +734,6 @@ int main(int argc, char** argv) {
 	InputMode mode = INPUT_MODE_NORMAL;
 	std::string input_buffer;
 	std::string current_source_filename;
-	std::vector<std::string> log_buffer;
 	std::vector<std::string> watch_expressions;
 	int log_scroll_offset = 0;
 	int locals_scroll_offset = 0;

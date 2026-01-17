@@ -33,6 +33,13 @@ Example with arguments and environment variables:
 ./tdbg ./example -e MYENV=qwe -- arg1 arg2 arg3
 ```
 
+Example with breakpoints:
+
+```sh
+./tdbg ./example -b main
+./tdbg ./example -b example.c:54 -b example.c:60
+```
+
 ### Interactive Commands
 
 | Key | Action                                                            |
